@@ -32,13 +32,13 @@ class IngestionPipeline:
             print(f"Error loading embedding model: {e}")
             raise e
         self.parent_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=600,
-            chunk_overlap=60,
+            chunk_size=1024,
+            chunk_overlap=128,
             separators=["\n\n", "\n", " ", ""]
         )
         self.child_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=150,
-            chunk_overlap=30,
+            chunk_size=512,
+            chunk_overlap=64,
             separators=["\n\n", "\n", " ", ""]
         )
 

@@ -53,14 +53,14 @@ class RetrievalEngine:
         # In practice, we combine ranks from both lists
         fused_scores = {}
         
-        # Dense ranks
+        # Dense ranks (Semantic)
         for rank, idx in enumerate(dense_results):
             fused_scores[idx] = fused_scores.get(idx, 0) + 1 / (k + rank + 1)
             
-        # Sparse ranks (top indices from bm25 scores)
-        sparse_indices = np.argsort(sparse_scores)[::-1][:30]
+        # Sparse ranks (Keywords) - Weighted higher (x1.5) to favor legal jargon
+        sparse_indices = np.argsort(sparse_scores)[::-1][:40]
         for rank, idx in enumerate(sparse_indices):
-            fused_scores[idx] = fused_scores.get(idx, 0) + 1 / (k + rank + 1)
+            fused_scores[idx] = fused_scores.get(idx, 0) + (1.5 / (k + rank + 1))
             
         return sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
 
@@ -77,10 +77,10 @@ class RetrievalEngine:
         except FileNotFoundError:
             return {"answer": "No documents found.", "sources": [], "latency": {"total": 0}}
 
-        # Step 1 & 2: Hybrid Retrieval
+        # Step 1 & 2: Hybrid Retrieval (Widened for Recall fix)
         t0 = time.time()
         query_embedding = self.embedding_model.encode([query_text], normalize_embeddings=True)
-        distances, indices = index.search(query_embedding, 30)
+        distances, indices = index.search(query_embedding, 50) 
         dense_hits = indices[0].tolist()
         
         tokenized_query = query_text.split()
@@ -90,15 +90,14 @@ class RetrievalEngine:
 
         # Step 3: Flashrank Reranking
         t0 = time.time()
-        top_20_indices = [idx for idx, score in fused_results[:20]]
-        top_20_chunks = [chunks[idx] for idx in top_20_indices if idx < len(chunks)]
-        passages = [{"id": c["chunk_id"], "text": c["text"], "meta": c} for c in top_20_chunks]
+        top_25_indices = [idx for idx, score in fused_results[:25]]
+        top_25_chunks = [chunks[idx] for idx in top_25_indices if idx < len(chunks)]
+        passages = [{"id": c["chunk_id"], "text": c["text"], "meta": c} for c in top_25_chunks]
         rerank_request = RerankRequest(query=query_text, passages=passages)
         reranked_results = self.reranker.rerank(rerank_request)
         
-        # FIX: Filter by threshold and take top 5 to ensure enough context for thorough answers
-        # A lower threshold (0.02) prevents missing documents while still blocking pure noise.
-        top_5 = [res for res in reranked_results if res["score"] > 0.02][:5]
+        # FIX: Balanced window (Top 8) with low-noise floor (0.01) to maximize Recall
+        top_8 = [res for res in reranked_results if res["score"] > 0.01][:8]
         latency["reranking"] = (time.time() - t0) * 1000
 
         # Step 4: Verification & Swap
@@ -107,7 +106,7 @@ class RetrievalEngine:
         sources = []
         conn = sqlite3.connect(metadata_db_path)
         cursor = conn.cursor()
-        for hit in top_5:
+        for hit in top_8:
             cursor.execute("SELECT parent_text, doc_name, lawyer_id FROM chunks WHERE id = ?", (hit["id"],))
             row = cursor.fetchone()
             if row and row[2] == lawyer_id:
@@ -133,10 +132,11 @@ class RetrievalEngine:
                     {
                         "role": "system", 
                         "content": (
-                            "You are an expert legal counsel. Your goal is to provide a comprehensive and thorough synthesized answer to the user's specific question using the provided context. "
-                            "Do not use defensive filler like 'According to the context'. Instead, state the facts directly as they appear in the documents and explain their legal implications. "
-                            "If a direct answer isn't explicitly written but can be logically inferred from the facts provided (e.g., calculating dates or combining clauses), you MUST provide that logical inference. "
-                            "Ensure the answer is detailed and addresses all parts of the user's query. Always cite the document source names as your authority."
+                            "You are a Senior Legal Counsel. Your goal is to provide a structured, multi-paragraph legal memorandum "
+                            "based on the provided context. NEVER provide one-sentence answers. "
+                            "Structure your response with: 1) Summary of Findings, 2) Detailed Analysis with Citations, and 3) Final Conclusion. "
+                            "If the context contains conflicting or incomplete information, analyze the gaps professionally. "
+                            "Always cite document source names for every fact stated."
                         )
                     },
                     {"role": "user", "content": f"Context:\n{context_str}\n\nQuestion: {query_text}"}

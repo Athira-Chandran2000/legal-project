@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 class UserCreate(BaseModel):
     username: str
@@ -17,7 +17,7 @@ class QueryResponse(BaseModel):
     answer: str
     sources: List[str]
     confidence: Optional[float] = None
-    latency_ms: Optional[dict] = None
+    latency: Optional[Dict[str, float]] = None
 
 class Token(BaseModel):
     access_token: str
