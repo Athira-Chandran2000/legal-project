@@ -65,11 +65,29 @@ class RetrievalEngine:
         return sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
 
     def query(self, lawyer_id: str, query_text: str):
-        """Executes the full multi-tenant RAG pipeline with latency tracking."""
+        """Executes the full multi-tenant RAG pipeline with HyDE and strict isolation."""
         latency = {}
         start_total = time.time()
 
-        # Stage 7: Tenant Resolution
+        # Step 0: HyDE (Hypothetical Document Embedding) to fix Recall@5
+        t0 = time.time()
+        hyde_answer = ""
+        if self.groq_client:
+            try:
+                hyde_resp = self.groq_client.chat.completions.create(
+                    model="llama-3.1-8b-instant",
+                    messages=[{"role": "user", "content": f"Write a hypothetical legal answer to this question: {query_text}"}],
+                    max_tokens=150,
+                    temperature=0.1
+                )
+                hyde_answer = hyde_resp.choices[0].message.content
+            except:
+                hyde_answer = query_text # Fallback to original query
+        else:
+            hyde_answer = query_text
+        latency["hyde_generation"] = (time.time() - t0) * 1000
+
+        # Stage 7: Tenant Resolution & Loading (STRICT ISOLATION)
         try:
             t0 = time.time()
             index, bm25, chunks, metadata_db_path = self._load_tenant_resources(lawyer_id)
@@ -77,12 +95,14 @@ class RetrievalEngine:
         except FileNotFoundError:
             return {"answer": "No documents found.", "sources": [], "latency": {"total": 0}}
 
-        # Step 1 & 2: Hybrid Retrieval (Widened for Recall fix)
+        # Step 1 & 2: Hybrid Retrieval with HyDE query
         t0 = time.time()
-        query_embedding = self.embedding_model.encode([query_text], normalize_embeddings=True)
+        # Use HyDE answer for embedding to improve semantic overlap
+        query_embedding = self.embedding_model.encode([hyde_answer], normalize_embeddings=True)
         distances, indices = index.search(query_embedding, 50) 
         dense_hits = indices[0].tolist()
         
+        # Use original query for BM25 to keep keyword precision
         tokenized_query = query_text.split()
         bm25_scores = bm25.get_scores(tokenized_query)
         fused_results = self.rrf_fusion(dense_hits, bm25_scores)
@@ -96,20 +116,21 @@ class RetrievalEngine:
         rerank_request = RerankRequest(query=query_text, passages=passages)
         reranked_results = self.reranker.rerank(rerank_request)
         
-        # FIX: Balanced window (Top 8) with low-noise floor (0.01) to maximize Recall
+        # FIX: Filter by threshold and take top 8 (Balanced context)
         top_8 = [res for res in reranked_results if res["score"] > 0.01][:8]
         latency["reranking"] = (time.time() - t0) * 1000
 
-        # Step 4: Verification & Swap
+        # Step 4: Verification & Swap (STRICT SECURITY CHECK)
         t0 = time.time()
         verified_context = []
         sources = []
         conn = sqlite3.connect(metadata_db_path)
         cursor = conn.cursor()
         for hit in top_8:
+            # We explicitly check lawyer_id here again to ensure ZERO leakage
             cursor.execute("SELECT parent_text, doc_name, lawyer_id FROM chunks WHERE id = ?", (hit["id"],))
             row = cursor.fetchone()
-            if row and row[2] == lawyer_id:
+            if row and str(row[2]) == str(lawyer_id):
                 if row[0] not in [c["text"] for c in verified_context]:
                     verified_context.append({"text": row[0], "doc": row[1]})
                     sources.append(row[1])
