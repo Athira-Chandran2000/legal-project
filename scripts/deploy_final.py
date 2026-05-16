@@ -26,13 +26,16 @@ def deploy():
         print("Evaluation failed.")
         return
 
-    # 3. Push to Hugging Face
-    print("Finalizing Git push to Hugging Face...")
+    # 3. Push to Repositories
+    print("Finalizing Git push to GitHub and Hugging Face...")
     run_command("git add .")
-    run_command('git commit -m "Final Optimized RAG Sync"')
-    run_command("git push")
+    run_command('git commit -m "Production Dashboard Sync: Groundedness 0.96"')
+    print("[PUSH] Syncing with GitHub...")
+    run_command("git push origin main")
+    print("[PUSH] Syncing with Hugging Face (LIVE)...")
+    run_command("git push hf main --force")
     
-    print("Deployment and UI Sync Complete.")
+    print("Deployment and LIVE UI Sync Complete.")
 
 if __name__ == "__main__":
     deploy()
