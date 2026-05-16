@@ -21,20 +21,18 @@ def ingest_samples():
 
     pipeline = IngestionPipeline()
 
-    # Load CUAD dataset from the Hub for realistic scale
+    # Load CUAD dataset from the Hub (Parquet-native version)
     try:
-        print("Loading CUAD dataset from the official theatticusproject/cuad-qa Hub...")
-        dataset = load_dataset("theatticusproject/cuad-qa", split="train")
-        # Extract unique contexts
+        print("Loading CUAD contracts from umarbutler/better-cuad Hub...")
+        dataset = load_dataset("umarbutler/better-cuad", split="train")
+        # Extract unique contracts
         cuad_docs = []
-        seen_contexts = set()
-        for row in dataset:
-            ctx = row.get("context", "")
-            if ctx and ctx not in seen_contexts:
-                cuad_docs.append({"doc_name": f"CUAD_{len(cuad_docs)}", "text": ctx})
-                seen_contexts.add(ctx)
+        for i, row in enumerate(dataset):
+            ctx = row.get("text", "")
+            if ctx:
+                cuad_docs.append({"doc_name": f"CUAD_{i}", "text": ctx})
                 if len(cuad_docs) >= 500: break
-        print(f"Streaming {len(cuad_docs)} unique contracts from CUAD.")
+        print(f"Streaming {len(cuad_docs)} clean legal contracts.")
     except Exception as e:
         print(f"Warning: Hub loading failed. Error: {e}")
         cuad_docs = []

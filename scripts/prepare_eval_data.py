@@ -7,8 +7,9 @@ def prepare_eval_data():
     print("Preparing high-quality 200-question evaluation set from CUAD...")
     
     try:
-        print("Streaming official CUAD Q&A pairs from the Hub...")
-        dataset = load_dataset("theatticusproject/cuad-qa", split="test")
+        print("Streaming CUAD Q&A pairs from chenghao/cuad_qa Hub...")
+        # chenghao/cuad_qa has 'train' and 'test' splits
+        dataset = load_dataset("chenghao/cuad_qa", split="test")
         all_qas = []
         for row in dataset:
             question = row.get("question", "")
@@ -22,7 +23,7 @@ def prepare_eval_data():
                 })
         print(f"Total candidate answerable questions: {len(all_qas)}")
     except Exception as e:
-        print(f"Error loading official Hub dataset: {e}")
+        print(f"Error loading Hub dataset: {e}")
         return
     
     # Sample 200 main questions
