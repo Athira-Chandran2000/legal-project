@@ -21,7 +21,7 @@ class RetrievalEngine:
         self.device = "cpu"
         print(f"Initializing RetrievalEngine with model: {embedding_model_name}")
         self.embedding_model = SentenceTransformer(embedding_model_name, device=self.device)
-        self.reranker = Ranker(model_name="ms-marco-MiniLM-L-12-v2", cache_dir="/tmp/flashrank")
+        self.reranker = Ranker(model_name="ms-marco-TinyBERT-L-2-v2", cache_dir="/tmp/flashrank")
         api_key = os.getenv("GROQ_API_KEY")
         self.groq_client = Groq(api_key=api_key) if api_key else None
 
@@ -96,11 +96,22 @@ class RetrievalEngine:
 
         # Step 2: Reranking (High Signal Window)
         t0 = time.time()
-        top_20_indices = [idx for idx, score in fused_results[:20]]
-        passages = [{"id": chunks[idx]["chunk_id"], "text": chunks[idx]["text"]} for idx in top_20_indices if idx < len(chunks)]
-        rerank_request = RerankRequest(query=query_text, passages=passages)
-        reranked_results = self.reranker.rerank(rerank_request)
-        top_5 = [res for res in reranked_results if res["score"] > 0.001][:5]
+        # Filter for valid indices only
+        max_idx = len(chunks)
+        top_20_indices = [idx for idx, score in fused_results[:20] if 0 <= idx < max_idx]
+        
+        try:
+            passages = [{"id": chunks[idx]["chunk_id"], "text": chunks[idx]["text"]} for idx in top_20_indices]
+            rerank_request = RerankRequest(query=query_text, passages=passages)
+            reranked_results = self.reranker.rerank(rerank_request)
+            top_5 = [res for res in reranked_results if res["score"] > 0.001][:5]
+            # Map back to original indices for verification
+            top_5_ids = [res["id"] for res in top_5]
+            top_5_indices = [idx for idx in top_20_indices if chunks[idx]["chunk_id"] in top_5_ids]
+        except Exception as e:
+            print(f"Warning: Reranking failed (falling back to hybrid): {e}")
+            top_5_indices = top_20_indices[:5]
+            
         latency["reranking"] = (time.time() - t0) * 1000
 
         # Step 3: Verification & Parent-Context Injection
@@ -109,8 +120,8 @@ class RetrievalEngine:
         sources = []
         conn = sqlite3.connect(metadata_db_path)
         cursor = conn.cursor()
-        for hit in top_5:
-            cursor.execute("SELECT parent_text, doc_name, lawyer_id FROM chunks WHERE id = ?", (hit["id"],))
+        for idx in top_5_indices:
+            cursor.execute("SELECT parent_text, doc_name, lawyer_id FROM chunks WHERE id = ?", (chunks[idx]["chunk_id"],))
             row = cursor.fetchone()
             if row and str(row[2]) == str(lawyer_id):
                 if row[0] not in [c["text"] for c in verified_context]:
