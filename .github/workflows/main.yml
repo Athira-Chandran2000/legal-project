@@ -17,25 +17,24 @@ jobs:
       with:
         python-version: '3.11'
         
-    - name: Install dependencies
+    - name: "Install dependencies"
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install pytest httpx
-        
-    - name: Stage 1: Unit Tests
+
+    - name: "Stage 1: Unit Tests"
       run: |
         pytest tests/
-        
-    - name: Stage 2 & 3: Multi-Tenant & Isolation Smoke Tests
+
+    - name: "Stage 2 & 3: Multi-Tenant & Isolation Smoke Tests"
       env:
         GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
       run: |
-        # Run a specialized script that checks isolation
         python scripts/evaluate.py --smoke-test
-        
-    - name: Stage 5: Deploy to Hugging Face Spaces
+
+    - name: "Stage 5: Deploy to Hugging Face Spaces"
       if: github.ref == 'refs/heads/main' && success()
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
