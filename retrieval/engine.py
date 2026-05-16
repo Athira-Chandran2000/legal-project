@@ -95,7 +95,10 @@ class RetrievalEngine:
         passages = [{"id": c["chunk_id"], "text": c["text"], "meta": c} for c in top_20_chunks]
         rerank_request = RerankRequest(query=query_text, passages=passages)
         reranked_results = self.reranker.rerank(rerank_request)
-        top_8 = reranked_results[:8]
+        
+        # FIX: Filter by threshold and take only top 3 to reduce noise injection
+        # Flashrank scores are usually 0-1. 0.1 is a safe but strict floor for this model.
+        top_3 = [res for res in reranked_results if res["score"] > 0.1][:3]
         latency["reranking"] = (time.time() - t0) * 1000
 
         # Step 4: Verification & Swap
@@ -104,7 +107,7 @@ class RetrievalEngine:
         sources = []
         conn = sqlite3.connect(metadata_db_path)
         cursor = conn.cursor()
-        for hit in top_8:
+        for hit in top_3:
             cursor.execute("SELECT parent_text, doc_name, lawyer_id FROM chunks WHERE id = ?", (hit["id"],))
             row = cursor.fetchone()
             if row and row[2] == lawyer_id:
