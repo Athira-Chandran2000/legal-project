@@ -146,6 +146,13 @@ if __name__ == "__main__":
             print(f"SMOKE TEST FAILED: {e}")
             sys.exit(1)
 
+    db = SessionLocal()
+    lawyer = db.query(Lawyer).filter(Lawyer.username == "lawyer1_nda").first()
+    
+    if not lawyer:
+        print("Please run setup first.")
+        sys.exit(1)
+
     # Load the 200-question production benchmark
     eval_file = "data/eval_set.json"
     if os.path.exists(eval_file):
