@@ -32,6 +32,7 @@ body {
 .container {
     width: 95vw;
     height: 90vh;
+    max-height: 90vh; /* Strict constraint */
     background: var(--glass);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
@@ -176,6 +177,7 @@ main {
     flex: 1;
     display: flex;
     overflow: hidden;
+    height: calc(100% - 80px); /* Subtract header height approx */
 }
 
 .chat-section {
@@ -183,6 +185,8 @@ main {
     display: flex;
     flex-direction: column;
     background: rgba(15, 23, 42, 0.3);
+    min-height: 0;
+    height: 100%;
 }
 
 #chat-messages {
@@ -284,11 +288,15 @@ main {
 /* Sidebar */
 aside {
     width: 300px;
+    height: 100%;
+    max-height: 100%;
     border-left: 1px solid var(--glass-border);
     padding: 32px;
     display: flex;
     flex-direction: column;
     gap: 24px;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .stat-card {

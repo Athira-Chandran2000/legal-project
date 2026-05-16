@@ -27,10 +27,21 @@ from fastapi.responses import HTMLResponse, FileResponse
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(
     title="LexGuard | Secure Legal RAG",
     description="Isolated RAG system for lawyers with hybrid retrieval and reranking.",
     version="1.0.0"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Mount static files
@@ -138,15 +149,21 @@ def query(
     request: QueryRequest, 
     current_lawyer: Lawyer = Depends(get_current_lawyer)
 ):
-    start_time = time.time()
-    result = retrieval_engine.query(current_lawyer.id, request.question)
-    latency = (time.time() - start_time) * 1000
-    
-    return {
-        "answer": result["answer"],
-        "sources": result["sources"],
-        "latency_ms": {"total": latency}
-    }
+    try:
+        result = retrieval_engine.query(current_lawyer.id, request.question)
+        
+        return {
+            "answer": result["answer"],
+            "sources": result["sources"],
+            "latency_ms": result["latency"]
+        }
+    except Exception as e:
+        print(f"Query error: {e}")
+        return {
+            "answer": f"Error: {str(e)}",
+            "sources": [],
+            "latency_ms": {"total": 0}
+        }
 
 @app.get("/smoke-test")
 async def run_smoke_test(current_lawyer: Lawyer = Depends(get_current_lawyer)):

@@ -95,7 +95,7 @@ class RetrievalEngine:
         passages = [{"id": c["chunk_id"], "text": c["text"], "meta": c} for c in top_20_chunks]
         rerank_request = RerankRequest(query=query_text, passages=passages)
         reranked_results = self.reranker.rerank(rerank_request)
-        top_5 = reranked_results[:5]
+        top_8 = reranked_results[:8]
         latency["reranking"] = (time.time() - t0) * 1000
 
         # Step 4: Verification & Swap
@@ -104,7 +104,7 @@ class RetrievalEngine:
         sources = []
         conn = sqlite3.connect(metadata_db_path)
         cursor = conn.cursor()
-        for hit in top_5:
+        for hit in top_8:
             cursor.execute("SELECT parent_text, doc_name, lawyer_id FROM chunks WHERE id = ?", (hit["id"],))
             row = cursor.fetchone()
             if row and row[2] == lawyer_id:
@@ -117,22 +117,40 @@ class RetrievalEngine:
         # Stage 8: Generation
         t0 = time.time()
         context_str = "\n\n".join([f"Source [{c['doc']}]: {c['text']}" for c in verified_context])
+        
         if not self.groq_client:
-            return {"answer": "Generation disabled.", "sources": list(set(sources)), "latency": latency}
+            latency["generation"] = 0
+            latency["total"] = (time.time() - start_total) * 1000
+            return {"answer": "Generation disabled: GROQ_API_KEY missing.", "sources": list(set(sources)), "latency": latency}
 
-        response = self.groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": "You are a specialized legal assistant. Use provided context only."},
-                {"role": "user", "content": f"Context:\n{context_str}\n\nQuestion: {query_text}"}
-            ],
-            temperature=0.1
-        )
+        try:
+            response = self.groq_client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": (
+                            "You are a highly detailed and professional legal analyst assistant. "
+                            "Your goal is to provide comprehensive, accurate, and helpful answers based ONLY on the provided context. "
+                            "When answering, explain the reasoning if possible and quote relevant sections from the documents. "
+                            "Always cite the document source names clearly. "
+                            "If the information is not present in the context, clearly state that you cannot find it."
+                        )
+                    },
+                    {"role": "user", "content": f"Context:\n{context_str}\n\nQuestion: {query_text}"}
+                ],
+                temperature=0.1
+            )
+            answer = response.choices[0].message.content
+        except Exception as e:
+            print(f"Groq API Error: {e}")
+            answer = f"I'm sorry, I encountered an error during generation: {str(e)}"
+
         latency["generation"] = (time.time() - t0) * 1000
         latency["total"] = (time.time() - start_total) * 1000
 
         return {
-            "answer": response.choices[0].message.content,
+            "answer": answer,
             "sources": list(set(sources)),
             "latency": latency
         }
