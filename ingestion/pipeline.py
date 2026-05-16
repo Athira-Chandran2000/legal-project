@@ -139,8 +139,11 @@ class IngestionPipeline:
             cursor.execute("INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?)",
                            (chunk["chunk_id"], chunk["parent_id"], chunk["parent_text"],
                             chunk["text"], chunk["doc_name"], chunk["lawyer_id"]))
+        
         conn.commit()
         conn.close()
+        
+        print(f"Completed indexing for {lawyer_id}. Total chunks: {len(all_chunks)}")
 
         # Step 5: BM25 Index
         if all_chunks:
