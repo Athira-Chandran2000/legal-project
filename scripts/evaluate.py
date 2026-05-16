@@ -115,9 +115,46 @@ class EvaluationSuite:
         # 3. Latency
         lat_df = pd.DataFrame(latencies)
         print("\n--- Latency Breakdown (ms) ---")
-        print(lat_df.mean().to_frame(name="Average").to_string())
+        avg_lat = lat_df.mean().to_frame(name="Average")
+        print(avg_lat.to_string())
         
-        return rag_results
+        # 4. SYNC WITH UI DASHBOARD
+        try:
+            print("\n[UI SYNC] Updating dashboard metrics in index.html...")
+            html_path = "app/static/index.html"
+            if os.path.exists(html_path):
+                with open(html_path, "r", encoding="utf-8") as f:
+                    html_content = f.read()
+                
+                # Robust replacement using ID and closing tag proximity
+                def update_val(html, element_id, new_val):
+                    import re
+                    pattern = f'id="{element_id}"[^>]*>([^<]+)<'
+                    replacement = f'id="{element_id}" style="font-size: 1rem;">{new_val}<'
+                    return re.sub(pattern, replacement, html)
+
+                # RAG Triad
+                html_content = update_val(html_content, "groundedness-val", f"{triad['Groundedness (Faithfulness)']:.2f}")
+                html_content = update_val(html_content, "context-rel-val", f"{triad['Context Relevance']:.2f}")
+                html_content = update_val(html_content, "answer-rel-val", f"{triad['Answer Relevance']:.2f}")
+                
+                # Retrieval Benchmarks
+                html_content = update_val(html_content, "metric-precision", f"{ret_df['p_at_k'].mean():.2f}")
+                html_content = update_val(html_content, "metric-recall", f"{ret_df['r_at_k'].mean():.2f}")
+                html_content = update_val(html_content, "metric-mrr", f"{ret_df['mrr'].mean():.2f}")
+                
+                # Sync Latency (Total)
+                total_lat = avg_lat.loc["total", "Average"] if "total" in avg_lat.index else 0
+                html_content = html_content.replace('id="latency-display" style="font-size: 1.5rem; color: var(--primary); font-weight: 800; margin: 4px 0;">--- ms', 
+                                                   f'id="latency-display" style="font-size: 1.5rem; color: var(--primary); font-weight: 800; margin: 4px 0;">{int(total_lat)} ms')
+                
+                with open(html_path, "w", encoding="utf-8") as f:
+                    f.write(html_content)
+                print("[UI SYNC] Dashboard synchronized successfully.")
+        except Exception as e:
+            print(f"[UI SYNC] Failed to update dashboard: {e}")
+        
+        return triad
 
 if __name__ == "__main__":
     import argparse
