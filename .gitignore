@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv
+venv/
+ENV/
+.env
+
+# Data and Indexes (Local only)
+data/tenants/*
+data/central_auth/*.db
+!data/tenants/.gitkeep
+!data/central_auth/.gitkeep
+
+# Ragas / Models cache
+.ragas/
+/tmp/flashrank
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
