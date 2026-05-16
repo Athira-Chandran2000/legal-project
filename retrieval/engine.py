@@ -96,9 +96,9 @@ class RetrievalEngine:
         rerank_request = RerankRequest(query=query_text, passages=passages)
         reranked_results = self.reranker.rerank(rerank_request)
         
-        # FIX: Filter by threshold and take only top 3 to reduce noise injection
-        # Flashrank scores are usually 0-1. 0.1 is a safe but strict floor for this model.
-        top_3 = [res for res in reranked_results if res["score"] > 0.1][:3]
+        # FIX: Filter by threshold and take top 5 to ensure enough context for thorough answers
+        # A lower threshold (0.02) prevents missing documents while still blocking pure noise.
+        top_5 = [res for res in reranked_results if res["score"] > 0.02][:5]
         latency["reranking"] = (time.time() - t0) * 1000
 
         # Step 4: Verification & Swap
@@ -107,7 +107,7 @@ class RetrievalEngine:
         sources = []
         conn = sqlite3.connect(metadata_db_path)
         cursor = conn.cursor()
-        for hit in top_3:
+        for hit in top_5:
             cursor.execute("SELECT parent_text, doc_name, lawyer_id FROM chunks WHERE id = ?", (hit["id"],))
             row = cursor.fetchone()
             if row and row[2] == lawyer_id:
@@ -133,10 +133,10 @@ class RetrievalEngine:
                     {
                         "role": "system", 
                         "content": (
-                            "You are an expert legal counsel. Your goal is to provide a direct, professional, and synthesized answer to the user's specific question using the provided context. "
-                            "Do not use defensive filler like 'According to the context'. Instead, state the facts directly as they appear in the documents. "
+                            "You are an expert legal counsel. Your goal is to provide a comprehensive and thorough synthesized answer to the user's specific question using the provided context. "
+                            "Do not use defensive filler like 'According to the context'. Instead, state the facts directly as they appear in the documents and explain their legal implications. "
                             "If a direct answer isn't explicitly written but can be logically inferred from the facts provided (e.g., calculating dates or combining clauses), you MUST provide that logical inference. "
-                            "Keep answers concise and high-impact. Always cite the document source names as your authority."
+                            "Ensure the answer is detailed and addresses all parts of the user's query. Always cite the document source names as your authority."
                         )
                     },
                     {"role": "user", "content": f"Context:\n{context_str}\n\nQuestion: {query_text}"}
