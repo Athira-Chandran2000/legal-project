@@ -7,16 +7,12 @@ def prepare_eval_data():
     print("Preparing high-quality 200-question evaluation set from CUAD...")
     
     try:
-        print("Streaming CUAD Q&A pairs from Hugging Face Hub...")
-        dataset = load_dataset("atticus_legal/cuad", split="test") # Use test split for eval
+        print("Streaming official CUAD Q&A pairs from the Hub...")
+        dataset = load_dataset("theatticusproject/cuad-qa", split="test")
         all_qas = []
         for row in dataset:
             question = row.get("question", "")
-            # In CUAD Hub, answers are often in a list of texts
             answers = row.get("answers", {}).get("text", [])
-            if not answers:
-                 # Try alternative schema
-                 answers = row.get("answers", [])
             
             if answers and len(str(answers[0])) > 10:
                 all_qas.append({
@@ -26,7 +22,7 @@ def prepare_eval_data():
                 })
         print(f"Total candidate answerable questions: {len(all_qas)}")
     except Exception as e:
-        print(f"Error loading Hub dataset: {e}")
+        print(f"Error loading official Hub dataset: {e}")
         return
     
     # Sample 200 main questions

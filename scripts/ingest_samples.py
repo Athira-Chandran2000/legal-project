@@ -23,11 +23,9 @@ def ingest_samples():
 
     # Load CUAD dataset from the Hub for realistic scale
     try:
-        print("Loading CUAD dataset from Hugging Face Hub...")
-        # CUAD v1 is available as atticus_legal/cuad
-        dataset = load_dataset("atticus_legal/cuad", split="train")
-        # In the Hub version, 'context' and 'qas' are usually nested or in columns
-        # We'll take unique contexts to get our 500 documents
+        print("Loading CUAD dataset from the official theatticusproject/cuad-qa Hub...")
+        dataset = load_dataset("theatticusproject/cuad-qa", split="train")
+        # Extract unique contexts
         cuad_docs = []
         seen_contexts = set()
         for row in dataset:
