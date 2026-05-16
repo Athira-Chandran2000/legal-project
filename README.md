@@ -2,7 +2,7 @@
 title: LexGuard Legal RAG
 emoji: ⚖️
 colorFrom: blue
-colorTo: gold
+colorTo: yellow
 sdk: docker
 pinned: false
 app_port: 7860
