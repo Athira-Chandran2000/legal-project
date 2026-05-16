@@ -1,4 +1,5 @@
 # Stage 13: Hugging Face Spaces Deployment
+# Build Trigger: Production Dashboard Sync v2
 FROM python:3.11-slim
 
 # Create a non-root user for HF Spaces
