@@ -68,6 +68,11 @@
                         <i data-lucide="send" style="color: black;"></i>
                     </button>
                 </div>
+                <div class="sample-queries" style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button class="sample-query-btn" onclick="setQuery('What is the governing law in the Alpha Corp agreement?')">Governing Law (Alpha Corp)</button>
+                    <button class="sample-query-btn" onclick="setQuery('What is the term of the Gamma Services NDA?')">NDA Term (Gamma)</button>
+                    <button class="sample-query-btn" onclick="setQuery('What are the audit rights in the software license?')">Audit Rights</button>
+                </div>
             </section>
 
             <aside>
@@ -362,6 +367,11 @@
                 console.error(err);
             }
         };
+
+        function setQuery(text) {
+            queryInput.value = text;
+            sendQuery();
+        }
 
         sendBtn.onclick = sendQuery;
         queryInput.onkeypress = (e) => { if (e.key === 'Enter') sendQuery(); };
