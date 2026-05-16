@@ -22,7 +22,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from auth.tenant_manager import TenantManager
 
 class IngestionPipeline:
-    def __init__(self, embedding_model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, embedding_model_name: str = "BAAI/bge-small-en-v1.5"):
         print(f"Initializing IngestionPipeline with model: {embedding_model_name}")
         self.device = "cpu" # Force CPU for stability on Windows
         try:
@@ -32,14 +32,14 @@ class IngestionPipeline:
             print(f"Error loading embedding model: {e}")
             raise e
         self.parent_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1024,
-            chunk_overlap=128,
-            separators=["\n\n", "\n", " ", ""]
+            chunk_size=1200,
+            chunk_overlap=200,
+            separators=["\n\n", "\n", ".", " "]
         )
         self.child_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=512,
-            chunk_overlap=64,
-            separators=["\n\n", "\n", " ", ""]
+            chunk_size=800,
+            chunk_overlap=150,
+            separators=["\n\n", "\n", ".", " "]
         )
 
     def extract_text_from_pdf(self, pdf_path: str) -> str:

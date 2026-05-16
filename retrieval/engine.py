@@ -17,7 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from auth.tenant_manager import TenantManager
 
 class RetrievalEngine:
-    def __init__(self, embedding_model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, embedding_model_name: str = "BAAI/bge-small-en-v1.5"):
         self.device = "cpu"
         print(f"Initializing RetrievalEngine with model: {embedding_model_name}")
         self.embedding_model = SentenceTransformer(embedding_model_name, device=self.device)
@@ -101,7 +101,12 @@ class RetrievalEngine:
                 model="llama-3.1-8b-instant",
                 messages=[{
                     "role": "system", 
-                    "content": "You are a direct legal assistant. Answer conversational and clearly based strictly on the provided documents. Always cite [Document Name]. If info is missing, say you don't have access to it."
+                    "content": (
+                        "You are a professional legal assistant. Answer ONLY using the provided context. "
+                        "If the answer is not present, say: 'Insufficient information in retrieved documents.' "
+                        "Cite section numbers and document names for every fact stated. "
+                        "Provide concise and legally precise answers."
+                    )
                 }, {"role": "user", "content": f"Context:\n{context_str}\n\nQuestion: {query_text}"}],
                 temperature=0.1
             )
