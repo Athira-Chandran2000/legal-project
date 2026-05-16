@@ -49,6 +49,17 @@ ingestion_pipeline = None
 @app.on_event("startup")
 async def startup_event():
     global retrieval_engine, ingestion_pipeline
+    
+    # Ensure demo data is initialized for the deployment environment
+    try:
+        print("Running one-time demo setup...")
+        from scripts.setup_demo import setup_demo
+        from scripts.ingest_samples import ingest_samples
+        setup_demo()
+        ingest_samples()
+    except Exception as e:
+        print(f"Startup setup skipped or failed: {e}")
+        
     retrieval_engine = RetrievalEngine()
     ingestion_pipeline = IngestionPipeline()
 
