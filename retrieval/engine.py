@@ -65,44 +65,51 @@ class RetrievalEngine:
         return sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
 
     def query(self, lawyer_id: str, query_text: str):
-        """Executes the full multi-tenant RAG pipeline with HyDE and strict isolation."""
+        """Executes the full isolated RAG pipeline with Zero-Leak guarantee."""
         latency = {}
         start_total = time.time()
 
-        # Step 0: HyDE (Hypothetical Document Embedding) to fix Recall@5
+        # Step 0: HyDE (Hypothetical Document Embedding)
         t0 = time.time()
         hyde_answer = ""
         if self.groq_client:
             try:
                 hyde_resp = self.groq_client.chat.completions.create(
                     model="llama-3.1-8b-instant",
-                    messages=[{"role": "user", "content": f"Write a hypothetical legal answer to this question: {query_text}"}],
-                    max_tokens=150,
+                    messages=[{"role": "user", "content": f"Briefly answer this legal question: {query_text}"}],
+                    max_tokens=100,
                     temperature=0.1
                 )
                 hyde_answer = hyde_resp.choices[0].message.content
             except:
-                hyde_answer = query_text # Fallback to original query
+                hyde_answer = query_text
         else:
             hyde_answer = query_text
         latency["hyde_generation"] = (time.time() - t0) * 1000
 
-        # Stage 7: Tenant Resolution & Loading (STRICT ISOLATION)
+        # Stage 7: Tenant Resource Loading (STRICT PHYSICAL ISOLATION)
+        # We load a FRESH handle for every query to prevent cross-tenant bleeding
         try:
             t0 = time.time()
-            index, bm25, chunks, metadata_db_path = self._load_tenant_resources(lawyer_id)
+            paths = TenantManager.get_tenant_index_paths(lawyer_id)
+            if not os.path.exists(paths["faiss_index"]):
+                raise FileNotFoundError
+                
+            index = faiss.read_index(paths["faiss_index"])
+            with open(paths["bm25_pickle"], 'rb') as f:
+                bm25 = pickle.load(f)
+            with open(paths["chunks_json"], 'r') as f:
+                chunks = json.load(f)
             latency["resource_loading"] = (time.time() - t0) * 1000
         except FileNotFoundError:
-            return {"answer": "No documents found.", "sources": [], "latency": {"total": 0}}
+            return {"answer": "I don't have access to any documents for your account yet.", "sources": [], "latency": {"total": 0}}
 
-        # Step 1 & 2: Hybrid Retrieval with HyDE query
+        # Step 1 & 2: Hybrid Retrieval
         t0 = time.time()
-        # Use HyDE answer for embedding to improve semantic overlap
         query_embedding = self.embedding_model.encode([hyde_answer], normalize_embeddings=True)
-        distances, indices = index.search(query_embedding, 50) 
+        distances, indices = index.search(query_embedding, 40) 
         dense_hits = indices[0].tolist()
         
-        # Use original query for BM25 to keep keyword precision
         tokenized_query = query_text.split()
         bm25_scores = bm25.get_scores(tokenized_query)
         fused_results = self.rrf_fusion(dense_hits, bm25_scores)
@@ -116,18 +123,18 @@ class RetrievalEngine:
         rerank_request = RerankRequest(query=query_text, passages=passages)
         reranked_results = self.reranker.rerank(rerank_request)
         
-        # FIX: Filter by threshold and take top 8 (Balanced context)
-        top_8 = [res for res in reranked_results if res["score"] > 0.01][:8]
+        # Take Top 6 (Clean context window)
+        top_6 = [res for res in reranked_results if res["score"] > 0.01][:6]
         latency["reranking"] = (time.time() - t0) * 1000
 
-        # Step 4: Verification & Swap (STRICT SECURITY CHECK)
+        # Step 4: Verification & Swap (THE FIREWALL)
         t0 = time.time()
         verified_context = []
         sources = []
-        conn = sqlite3.connect(metadata_db_path)
+        conn = sqlite3.connect(paths["metadata_db"])
         cursor = conn.cursor()
-        for hit in top_8:
-            # We explicitly check lawyer_id here again to ensure ZERO leakage
+        for hit in top_6:
+            # We strictly verify that every retrieved chunk belongs to THIS lawyer_id
             cursor.execute("SELECT parent_text, doc_name, lawyer_id FROM chunks WHERE id = ?", (hit["id"],))
             row = cursor.fetchone()
             if row and str(row[2]) == str(lawyer_id):
@@ -137,15 +144,10 @@ class RetrievalEngine:
         conn.close()
         latency["verification"] = (time.time() - t0) * 1000
 
-        # Stage 8: Generation
+        # Stage 8: Generation (CONVERSATIONAL STYLE)
         t0 = time.time()
-        context_str = "\n\n".join([f"Source [{c['doc']}]: {c['text']}" for c in verified_context])
+        context_str = "\n\n".join([f"Document [{c['doc']}]: {c['text']}" for c in verified_context])
         
-        if not self.groq_client:
-            latency["generation"] = 0
-            latency["total"] = (time.time() - start_total) * 1000
-            return {"answer": "Generation disabled: GROQ_API_KEY missing.", "sources": list(set(sources)), "latency": latency}
-
         try:
             response = self.groq_client.chat.completions.create(
                 model="llama-3.1-8b-instant",
@@ -153,11 +155,11 @@ class RetrievalEngine:
                     {
                         "role": "system", 
                         "content": (
-                            "You are a Senior Legal Counsel. Your goal is to provide a structured, multi-paragraph legal memorandum "
-                            "based on the provided context. NEVER provide one-sentence answers. "
-                            "Structure your response with: 1) Summary of Findings, 2) Detailed Analysis with Citations, and 3) Final Conclusion. "
-                            "If the context contains conflicting or incomplete information, analyze the gaps professionally. "
-                            "Always cite document source names for every fact stated."
+                            "You are a professional legal assistant. Your goal is to provide helpful, conversational, and direct answers "
+                            "based strictly on the provided documents. Speak naturally like ChatGPT, but always include citations like [Document Name] "
+                            "immediately after stating a fact from that source. "
+                            "If the user asks about a document that is not in your context (like a software license or real estate when you only have NDAs), "
+                            "you MUST state that you do not have access to that information."
                         )
                     },
                     {"role": "user", "content": f"Context:\n{context_str}\n\nQuestion: {query_text}"}
