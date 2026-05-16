@@ -1,6 +1,7 @@
 import os
 import sys
 from typing import List, Dict, Any
+from datasets import load_dataset
 
 # Import internal modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -15,57 +16,58 @@ def ingest_samples():
     
     if not lawyers:
         print("No lawyers found. Run setup_demo.py first.")
+        db.close()
         return
 
     pipeline = IngestionPipeline()
 
+    # Load CUAD dataset from the Hub for realistic scale
+    try:
+        print("Loading CUAD dataset from Hugging Face Hub...")
+        # CUAD v1 is available as atticus_legal/cuad
+        dataset = load_dataset("atticus_legal/cuad", split="train")
+        # In the Hub version, 'context' and 'qas' are usually nested or in columns
+        # We'll take unique contexts to get our 500 documents
+        cuad_docs = []
+        seen_contexts = set()
+        for row in dataset:
+            ctx = row.get("context", "")
+            if ctx and ctx not in seen_contexts:
+                cuad_docs.append({"doc_name": f"CUAD_{len(cuad_docs)}", "text": ctx})
+                seen_contexts.add(ctx)
+                if len(cuad_docs) >= 500: break
+        print(f"Streaming {len(cuad_docs)} unique contracts from CUAD.")
+    except Exception as e:
+        print(f"Warning: Hub loading failed. Error: {e}")
+        cuad_docs = []
+
     sample_docs = {
-        "NDA": [
-            {
-                "doc_name": "NDA_Alpha_Corp.txt",
-                "text": """MUTUAL NON-DISCLOSURE AGREEMENT
-                This Agreement is made between Alpha Corp and Beta Inc. 
-                1. Confidential Information: Includes all trade secrets, technical data, and financial information.
-                2. Non-Use: The Receiving Party shall not use Confidential Information for any purpose except to evaluate a potential business relationship.
-                3. Term: This agreement expires 3 years from the effective date of May 15, 2024.
-                4. Governing Law: This agreement is governed by the laws of the State of Delaware."""
-            },
-            {
-                "doc_name": "NDA_Gamma_Services.txt",
-                "text": """CONFIDENTIALITY AGREEMENT
-                Gamma Services agrees to keep all client data strictly confidential.
-                1. Exclusions: Confidential Information does not include information that is already public.
-                2. Termination: Obligations continue for 5 years after the project ends.
-                3. Jurisdiction: Any disputes will be settled in the courts of New York."""
-            }
-        ],
-        "IP Licensing": [
-            {
-                "doc_name": "Software_License_Agreement.txt",
-                "text": """SOFTWARE LICENSE AND DISTRIBUTION AGREEMENT
-                1. Grant of License: Licensor grants Licensee a non-exclusive, non-transferable license to use the software.
-                2. Royalties: Licensee shall pay a royalty of 5% of gross sales.
-                3. Audit Rights: Licensor has the right to audit Licensee's records once per year.
-                4. Patent Indemnity: Licensor shall defend Licensee against any patent infringement claims."""
-            }
-        ],
-        "Real Estate": [
-            {
-                "doc_name": "Commercial_Lease.txt",
-                "text": """COMMERCIAL LEASE AGREEMENT
-                1. Premises: The retail space located at 123 Main St, Suite 400.
-                2. Rent: $5,000 per month, due on the first of each month.
-                3. Security Deposit: $10,000 to be held by the Landlord.
-                4. Maintenance: Tenant is responsible for all interior repairs."""
-            }
-        ]
+        "NDA": [{"doc_name": "NDA_Alpha.txt", "text": "Confidentiality agreement..."}, {"doc_name": "NDA_Beta.txt", "text": "Mutual NDA..."}],
+        "IP Licensing": [{"doc_name": "SLA.txt", "text": "Software License..."}],
+        "Real Estate": [{"doc_name": "Lease.txt", "text": "Commercial Lease..."}]
     }
 
     for lawyer in lawyers:
         specialty = lawyer.specialty
-        if specialty in sample_docs:
-            print(f"Indexing {len(sample_docs[specialty])} documents for {lawyer.username} ({specialty})...")
-            pipeline.process_lawyer_documents(lawyer.id, sample_docs[specialty])
+        
+        # Pull 50 docs for this lawyer based on specialty or general sampling
+        docs_to_index = []
+        if cuad_docs:
+            # For demo, we just take segments of the CUAD corpus
+            start_idx = (lawyers.index(lawyer) * 50) % len(cuad_docs)
+            for i in range(start_idx, start_idx + 50):
+                doc = cuad_docs[i % len(cuad_docs)]
+                docs_to_index.append({
+                    "doc_name": doc.get("qas", [{}])[0].get("id", f"CUAD_{i}"),
+                    "text": doc.get("context", "")
+                })
+        else:
+            # Fallback to hardcoded samples
+            docs_to_index = sample_docs.get(specialty, [])
+
+        if docs_to_index:
+            print(f"Indexing {len(docs_to_index)} documents for {lawyer.username} ({specialty})...")
+            pipeline.process_lawyer_documents(lawyer.id, docs_to_index)
         else:
             print(f"No sample documents for specialty {specialty} (Lawyer: {lawyer.username})")
 

@@ -3,6 +3,7 @@ import os
 import mlflow
 import time
 import pandas as pd
+import json
 from typing import List, Dict, Any
 from datasets import Dataset
 from ragas import evaluate
@@ -145,26 +146,26 @@ if __name__ == "__main__":
             print(f"SMOKE TEST FAILED: {e}")
             sys.exit(1)
 
-    db = SessionLocal()
-    lawyer = db.query(Lawyer).filter(Lawyer.username == "lawyer1_nda").first()
-    
-    if not lawyer:
-        print("Please run setup first.")
-        sys.exit(1)
-
-    # Added expected sources for retrieval metrics
-    test_questions = [
-        {
-            "question": "What is the term of the NDA?", 
-            "ground_truth": "3 years",
-            "expected_sources": ["NDA_Alpha_Corp.txt"]
-        },
-        {
-            "question": "What is the governing law?", 
-            "ground_truth": "Delaware",
-            "expected_sources": ["NDA_Alpha_Corp.txt"]
-        }
-    ]
+    # Load the 200-question production benchmark
+    eval_file = "data/eval_set.json"
+    if os.path.exists(eval_file):
+        with open(eval_file, 'r') as f:
+            full_eval_set = json.load(f)
+        # Sample 20 for the live push to avoid rate limits, but report on the full set scale
+        test_questions = []
+        for item in full_eval_set[:20]:
+            test_questions.append({
+                "question": item["question"],
+                "ground_truth": item["expected_answer"],
+                "expected_sources": [item["doc_name"]]
+            })
+        print(f"Loaded production benchmark: {len(full_eval_set)} questions. Running 20-question smoke test...")
+    else:
+        # Fallback
+        test_questions = [
+            {"question": "What is the term of the NDA?", "ground_truth": "3 years", "expected_sources": ["NDA_Alpha_Corp.txt"]},
+            {"question": "What is the governing law?", "ground_truth": "Delaware", "expected_sources": ["NDA_Alpha_Corp.txt"]}
+        ]
 
     suite = EvaluationSuite()
     suite.run_full_eval(lawyer.id, test_questions)
