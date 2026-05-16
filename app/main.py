@@ -155,7 +155,7 @@ def query(
         return {
             "answer": result["answer"],
             "sources": result["sources"],
-            "latency_ms": result["latency"]
+            "latency": result["latency"]
         }
     except Exception as e:
         print(f"Query error: {e}")
