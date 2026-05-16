@@ -22,23 +22,22 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from auth.tenant_manager import TenantManager
 
 class IngestionPipeline:
-    def __init__(self, embedding_model_name: str = "BAAI/bge-small-en-v1.5"):
+    def __init__(self, embedding_model_name: str = "BAAI/bge-base-en-v1.5"):
         print(f"Initializing IngestionPipeline with model: {embedding_model_name}")
-        self.device = "cpu" # Force CPU for stability on Windows
+        self.device = "cpu"
         try:
             self.embedding_model = SentenceTransformer(embedding_model_name, device=self.device)
-            print("Embedding model loaded successfully.")
+            print("BGE-Base model loaded.")
         except Exception as e:
-            print(f"Error loading embedding model: {e}")
             raise e
         self.parent_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1200,
-            chunk_overlap=200,
+            chunk_size=800,
+            chunk_overlap=100,
             separators=["\n\n", "\n", ".", " "]
         )
         self.child_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=800,
-            chunk_overlap=150,
+            chunk_size=256,
+            chunk_overlap=50,
             separators=["\n\n", "\n", ".", " "]
         )
 

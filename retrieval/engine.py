@@ -17,7 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from auth.tenant_manager import TenantManager
 
 class RetrievalEngine:
-    def __init__(self, embedding_model_name: str = "BAAI/bge-small-en-v1.5"):
+    def __init__(self, embedding_model_name: str = "BAAI/bge-base-en-v1.5"):
         self.device = "cpu"
         print(f"Initializing RetrievalEngine with model: {embedding_model_name}")
         self.embedding_model = SentenceTransformer(embedding_model_name, device=self.device)
@@ -37,19 +37,40 @@ class RetrievalEngine:
         return index, bm25, chunks, paths["metadata_db"]
 
     def _rrf_fusion(self, dense_results, sparse_scores, k=60):
-        """Standard 50/50 RRF for stability."""
+        """Stable equal-weight RRF to prevent keyword bias noise."""
         fused_scores = {}
+        # Dense ranks
         for rank, idx in enumerate(dense_results):
             fused_scores[idx] = fused_scores.get(idx, 0) + 1 / (k + rank + 1)
-        sparse_indices = np.argsort(sparse_scores)[::-1][:40]
+        # Sparse ranks (BM25) - Balanced at 1.0x
+        sparse_indices = np.argsort(sparse_scores)[::-1][:20]
         for rank, idx in enumerate(sparse_indices):
             fused_scores[idx] = fused_scores.get(idx, 0) + 1 / (k + rank + 1)
         return sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
 
     def query(self, lawyer_id: str, query_text: str):
-        """Stable, direct RAG pipeline with Parent-Context injection."""
+        """Deep Signal RAG with Query Expansion and Chain-of-Thought synthesis."""
         latency = {}
         start_total = time.time()
+
+        # Step 0: Legal Query Expansion
+        t0 = time.time()
+        search_queries = [query_text]
+        if self.groq_client:
+            try:
+                expand_resp = self.groq_client.chat.completions.create(
+                    model="llama-3.1-8b-instant",
+                    messages=[{
+                        "role": "system", 
+                        "content": "Rewrite this legal question using three alternative phrasings that use formal contract law terminology. Return only the 3 rephrased questions."
+                    }, {"role": "user", "content": query_text}],
+                    max_tokens=150,
+                    temperature=0.1
+                )
+                variations = expand_resp.choices[0].message.content.split("\n")
+                search_queries.extend([v.strip() for v in variations if v.strip()][:3])
+            except: pass
+        latency["query_expansion"] = (time.time() - t0) * 1000
 
         # Stage 7: Tenant Resource Loading
         try:
@@ -59,16 +80,21 @@ class RetrievalEngine:
         except FileNotFoundError:
             return {"answer": "No documents found.", "sources": [], "latency": {"total": 0}}
 
-        # Step 1: Hybrid Retrieval (Pure Query)
+        # Step 1: Broad Search with BGE Prefix
         t0 = time.time()
-        q_emb = self.embedding_model.encode([query_text], normalize_embeddings=True)
-        dist, ind = index.search(q_emb, 30)
+        # BGE Mandatory Prefix: "Represent this sentence for searching relevant passages: "
+        prefixed_queries = [f"Represent this sentence for searching relevant passages: {q}" for q in search_queries]
+        q_embeddings = self.embedding_model.encode(prefixed_queries, normalize_embeddings=True)
+        # Average embeddings for query expansion consensus
+        avg_embedding = np.mean(q_embeddings, axis=0, keepdims=True)
+        
+        dist, ind = index.search(avg_embedding, 20)
         dense_hits = ind[0].tolist()
         bm25_scores = bm25.get_scores(query_text.split())
         fused_results = self._rrf_fusion(dense_hits, bm25_scores)
         latency["hybrid_retrieval"] = (time.time() - t0) * 1000
 
-        # Step 2: Reranking
+        # Step 2: Reranking (High Signal Window)
         t0 = time.time()
         top_20_indices = [idx for idx, score in fused_results[:20]]
         passages = [{"id": chunks[idx]["chunk_id"], "text": chunks[idx]["text"]} for idx in top_20_indices if idx < len(chunks)]
@@ -77,7 +103,7 @@ class RetrievalEngine:
         top_5 = [res for res in reranked_results if res["score"] > 0.001][:5]
         latency["reranking"] = (time.time() - t0) * 1000
 
-        # Step 3: Isolation & Parent-Context Swap
+        # Step 3: Verification & Parent-Context Injection
         t0 = time.time()
         verified_context = []
         sources = []
@@ -93,26 +119,31 @@ class RetrievalEngine:
         conn.close()
         latency["verification"] = (time.time() - t0) * 1000
 
-        # Stage 8: Conversational Generation
+        # Stage 8: Chain-of-Thought Legal Synthesis
         t0 = time.time()
         context_str = "\n\n".join([f"Document [{c['doc']}]: {c['text']}" for c in verified_context])
+        system_prompt = (
+            "You are a professional legal assistant. Answer ONLY using the provided context. "
+            "Follow this process:\n"
+            "1. Identify the retrieved contract section that most directly addresses the question.\n"
+            "2. Construct a comprehensive answer of at least three to five sentences.\n"
+            "3. If the context partially addresses the question, provide what can be answered and explicitly identify what specific information is missing.\n"
+            "4. Structure: Direct answer first, supporting evidence with [Document Name] citations second, and caveats third.\n"
+            "5. If no information is found, say: 'Insufficient information in retrieved documents.'"
+        )
+        
         try:
             response = self.groq_client.chat.completions.create(
                 model="llama-3.1-8b-instant",
-                messages=[{
-                    "role": "system", 
-                    "content": (
-                        "You are a professional legal assistant. Answer ONLY using the provided context. "
-                        "If the answer is not present, say: 'Insufficient information in retrieved documents.' "
-                        "Cite section numbers and document names for every fact stated. "
-                        "Provide concise and legally precise answers."
-                    )
-                }, {"role": "user", "content": f"Context:\n{context_str}\n\nQuestion: {query_text}"}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Context:\n{context_str}\n\nQuestion: {query_text}"}
+                ],
                 temperature=0.1
             )
             answer = response.choices[0].message.content
         except Exception as e:
-            answer = f"Error: {str(e)}"
+            answer = f"Error during synthesis: {str(e)}"
 
         latency["generation"] = (time.time() - t0) * 1000
         latency["total"] = (time.time() - start_total) * 1000
