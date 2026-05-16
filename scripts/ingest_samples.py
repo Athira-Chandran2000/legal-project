@@ -29,8 +29,10 @@ def ingest_samples():
         cuad_docs = []
         for i, row in enumerate(dataset):
             ctx = row.get("text", "")
+            # Use the official CUAD ID to ensure evaluation matching
+            doc_id = row.get("id", f"CUAD_{i}")
             if ctx:
-                cuad_docs.append({"doc_name": f"CUAD_{i}", "text": ctx})
+                cuad_docs.append({"doc_name": doc_id, "text": ctx})
                 if len(cuad_docs) >= 500: break
         print(f"Streaming {len(cuad_docs)} clean legal contracts.")
     except Exception as e:
